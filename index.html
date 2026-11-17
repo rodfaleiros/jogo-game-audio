@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Adivinhe a Música do Game</title>
+<style>
+:root{--bg:#12121c;--card:#1d1d2e;--tx:#f2f2f7;--mut:#9a9ab5;--ac:#7c5cff;--ok:#2ecc71;--bad:#ff5c5c}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font-family:system-ui,Segoe UI,Arial,sans-serif}
+nav{display:flex;gap:8px;padding:12px;justify-content:center}
+nav button{background:var(--card);color:var(--mut)}
+nav button.on{background:var(--ac);color:#fff}
+main{max-width:760px;margin:0 auto;padding:12px 16px 60px}
+h1,h2{text-align:center}
+button{border:0;border-radius:10px;padding:12px 20px;font-size:16px;font-weight:700;cursor:pointer;background:var(--ac);color:#fff}
+button:disabled{opacity:.35;cursor:not-allowed}
+button.big{display:block;margin:24px auto;font-size:36px;padding:28px 70px}
+button.sec{background:#34344d}
+button.del{background:var(--bad)}
+.row{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin:16px 0}
+label{display:block;margin:10px 0;color:var(--mut);font-size:14px}
+input,select{width:100%;margin-top:4px;padding:11px;font-size:16px;border-radius:8px;border:1px solid #3a3a55;background:var(--card);color:var(--tx)}
+input:disabled,select:disabled{opacity:.4}
+.card{background:var(--card);border-radius:12px;padding:14px 18px;margin:14px 0}
+.status{text-align:center;color:var(--mut);margin:6px 0}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{padding:6px 8px;border-bottom:1px solid #2c2c44;text-align:left}
+.tbl{overflow-x:auto}
+.pts{color:var(--ok);font-weight:700}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.win{font-size:clamp(28px,8vw,56px);text-align:center;font-weight:900;margin:24px 0;color:var(--ok)}
+.msg{color:var(--bad);text-align:center}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<nav><button id="tabG" class="on">JOGO</button><button id="tabA">ADMIN</button></nav>
+
+<main id="game">
+  <h1>🎮 Adivinhe a Música do Game</h1>
+  <div class="status" id="status"></div>
+  <div class="msg" id="gmsg"></div>
+
+  <div id="round" hidden>
+    <div class="row"><button id="play">PLAY</button><button id="reveal">REVEAL ANSWER</button></div>
+    <div class="card">
+      <label>1. Nome da música<input id="fName" autocomplete="off"></label>
+      <label>2. Jogo de origem<input id="fGame" autocomplete="off"></label>
+      <label>3. Console<select id="fCons"></select></label>
+      <label>4. Ano de lançamento<input id="fYear" type="number" min="1950" max="2100"></label>
+    </div>
+    <div class="card" id="result" hidden></div>
+  </div>
+
+  <div id="startWrap"><button id="start" class="big">START</button></div>
+  <div class="card tbl" id="board" hidden></div>
+  <div id="final" hidden></div>
+</main>
+
+<main id="admin" hidden>
+  <h1>⚙️ Admin – Banco de músicas</h1>
+  <div class="card">
+    <h2 id="formTitle" style="margin-top:0">Nova música</h2>
+    <label>Link da música (YouTube ou arquivo de áudio direto .mp3/.ogg/.wav)<input id="aLink"></label>
+    <label>Nome da música<input id="aName"></label>
+    <label>Jogo de origem<input id="aGame"></label>
+    <label>Console<input id="aCons"></label>
+    <label>Ano de lançamento<input id="aYear" type="number" min="1950" max="2100"></label>
+    <div class="row"><button id="aSave">ADICIONAR</button><button id="aCancel" class="sec" hidden>CANCELAR EDIÇÃO</button></div>
+    <div class="msg" id="amsg"></div>
+  </div>
+  <div class="card tbl"><div id="list"></div></div>
+  <div class="row">
+    <button class="sec" id="exp">EXPORTAR BACKUP (.json)</button>
+    <button class="sec" id="impBtn">IMPORTAR BACKUP</button>
+    <input type="file" id="imp" accept=".json" hidden>
+  </div>
+</main>
+
+<div id="ytwrap" style="position:fixed;left:-9999px;top:0;width:200px;height:200px"><div id="ytbox"></div></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const KEY = 'gamequiz_db_v1';
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+/* ---------- Banco de dados ---------- */
+let db = [];
+try { db = JSON.parse(localStorage.getItem(KEY)) || []; } catch (e) { db = []; }
+function saveDb() { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (e) { alert('Não foi possível salvar no navegador.'); } }
+
+/* ---------- Pontuação ---------- */
+const norm = s => (s || '').toString().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim().replace(/\s+/g, ' ');
+function lev(a, b) {
+  const m = a.length, n = b.length;
+  let prev = Array.from({length: n + 1}, (_, j) => j);
+  for (let i = 1; i <= m; i++) {
+    const cur = [i];
+    for (let j = 1; j <= n; j++)
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    prev = cur;
+  }
+  return prev[n];
+}
+// 0-1 erro = máximo; depois perde 1 ponto por erro extra; totalmente diferente = 0
+function textScore(ans, corr, max) {
+  const a = norm(ans), c = norm(corr);
+  if (!a) return 0;
+  const e = lev(a, c);
+  if (e <= 1) return max;
+  if (e >= c.length) return 0;
+  return Math.max(0, max - (e - 1));
+}
+function yearScore(ans, corr) {
+  const a = parseInt(ans, 10), c = parseInt(corr, 10);
+  if (isNaN(a) || isNaN(c)) return 0;
+  return Math.max(0, 8 - Math.abs(a - c));
+}
+
+/* ---------- Áudio ---------- */
+const aud = new Audio();
+let ytp = null, ytApi = null, pendSeek = false, timer = null;
+const ytId = u => { const m = (u || '').match(/(?:youtu\.be\/|v=|embed\/|shorts\/)([\w-]{11})/); return m ? m[1] : null; };
+function loadYT() {
+  if (window.YT && YT.Player) return Promise.resolve();
+  return ytApi || (ytApi = new Promise((res, rej) => {
+    window.onYouTubeIframeAPIReady = res;
+    const s = document.createElement('script');
+    s.src = 'https://www.youtube.com/iframe_api';
+    s.onerror = () => rej(new Error('yt'));
+    document.head.appendChild(s);
+  }));
+}
+function onYT(e) {
+  if (e.data === 1 && pendSeek) { // começou a tocar pela 1ª vez: define o trecho
+    pendSeek = false;
+    const d = ytp.getDuration();
+    start = d > 10 ? Math.random() * (d - 10) : 0;
+    ytp.seekTo(start, true);
+    armStop();
+  }
+}
+function stopAll() { clearTimeout(timer); aud.pause(); if (ytp && ytp.pauseVideo) try { ytp.pauseVideo(); } catch (e) {} setPlaying(false); }
+function armStop() { clearTimeout(timer); timer = setTimeout(stopAll, 10000); setPlaying(true); }
+function setPlaying(p) { playing = p; refreshPlay(); }
+
+/* ---------- Estado do jogo ---------- */
+let r = 0, scores = [], used = [], cur = null, start = null, plays = 0, locked = true, playing = false, ready = false;
+
+function consoles() {
+  const seen = new Map();
+  db.forEach(s => { const k = norm(s.console); if (k && !seen.has(k)) seen.set(k, s.console.trim()); });
+  return [...seen.values()].sort((a, b) => a.localeCompare(b));
+}
+function fillConsoles() {
+  $('fCons').innerHTML = '<option value="">— escolha —</option>' + consoles().map(c => `<option>${esc(c)}</option>`).join('');
+}
+function refreshPlay() {
+  $('play').textContent = `PLAY (${3 - plays} restante${3 - plays === 1 ? '' : 's'})`;
+  $('play').disabled = locked || !ready || plays >= 3 || playing;
+}
+function setFields(on) { ['fName', 'fGame', 'fCons', 'fYear'].forEach(i => $(i).disabled = !on); }
+function who(i) { return i % 2 === 0 ? 'PLAYER 1' : 'PLAYER 2'; }
+
+async function beginRound() {
+  $('gmsg').textContent = '';
+  if (!db.length) { $('gmsg').textContent = 'O banco está vazio. Adicione músicas na aba ADMIN.'; return; }
+  let pool = db.filter(s => !used.includes(s.id));
+  if (!pool.length) { used = []; pool = db; }
+  cur = pool[Math.floor(Math.random() * pool.length)];
+  used.push(cur.id);
+  start = null; plays = 0; locked = false; ready = false; pendSeek = false;
+  stopAll();
+  ['fName', 'fGame', 'fYear'].forEach(i => $(i).value = '');
+  fillConsoles(); $('fCons').value = '';
+  setFields(false);
+  $('result').hidden = true;
+  $('round').hidden = false; $('startWrap').hidden = true;
+  $('reveal').disabled = false;
+  $('status').textContent = `Rodada ${r + 1} de 6 — vez do ${who(r)}`;
+  refreshPlay();
+  try {
+    const id = ytId(cur.link);
+    if (id) {
+      await loadYT();
+      if (!ytp) await new Promise(res => { ytp = new YT.Player('ytbox', {height: 200, width: 200, events: {onReady: res, onStateChange: onYT}}); });
+      ytp.cueVideoById(id);
+      cur.yt = true;
+    } else {
+      cur.yt = false;
+      aud.src = cur.link;
+      await new Promise((res, rej) => { aud.onloadedmetadata = res; aud.onerror = () => rej(new Error('audio')); aud.load(); });
+      const d = aud.duration;
+      start = isFinite(d) && d > 10 ? Math.random() * (d - 10) : 0;
+    }
+    ready = true;
+  } catch (e) {
+    $('gmsg').textContent = 'Não consegui carregar esta música (verifique o link no ADMIN). Clique em REVEAL ANSWER para pular a rodada.';
+  }
+  refreshPlay();
+}
+
+function play() {
+  if (locked || !ready || plays >= 3 || playing) return;
+  plays++; setFields(true); stopAll();
+  if (cur.yt) {
+    if (start === null) { pendSeek = true; ytp.loadVideoById(ytId(cur.link)); setPlaying(true); }
+    else { ytp.seekTo(start, true); ytp.playVideo(); armStop(); }
+  } else {
+    aud.currentTime = start;
+    aud.play().catch(() => {});
+    armStop();
+  }
+  refreshPlay();
+}
+
+function reveal() {
+  if (locked) return;
+  locked = true; stopAll(); setFields(false); $('reveal').disabled = true; $('play').disabled = true;
+  const a = {name: $('fName').value, game: $('fGame').value, cons: $('fCons').value, year: $('fYear').value};
+  const p = [
+    textScore(a.name, cur.name, 10),
+    textScore(a.game, cur.game, 7),
+    a.cons && norm(a.cons) === norm(cur.console) ? 3 : 0,
+    yearScore(a.year, cur.year)
+  ];
+  const total = p.reduce((x, y) => x + y, 0);
+  scores.push({p, total, name: cur.name});
+  $('result').innerHTML = `<h2 style="margin-top:0">Respostas corretas</h2>
+    <p>1. Nome: <b>${esc(cur.name)}</b> <span class="pts">+${p[0]}</span></p>
+    <p>2. Jogo: <b>${esc(cur.game)}</b> <span class="pts">+${p[1]}</span></p>
+    <p>3. Console: <b>${esc(cur.console)}</b> <span class="pts">+${p[2]}</span></p>
+    <p>4. Ano: <b>${esc(cur.year)}</b> <span class="pts">+${p[3]}</span></p>
+    <p><b>Total da rodada: <span class="pts">${total} / 28</span></b></p>`;
+  $('result').hidden = false;
+  r++;
+  drawBoard();
+  $('start').textContent = r >= 6 ? 'VER PLACAR FINAL' : 'START';
+  $('start').style.fontSize = r >= 6 ? '24px' : '';
+  $('startWrap').hidden = false;
+}
+
+function drawBoard() {
+  $('board').hidden = false;
+  $('board').innerHTML = `<table><tr><th>Rodada</th><th>Jogador</th><th>Nome</th><th>Jogo</th><th>Console</th><th>Ano</th><th>Total</th></tr>` +
+    scores.map((s, i) => `<tr><td>${i + 1}</td><td>${who(i)}</td><td>${s.p[0]}</td><td>${s.p[1]}</td><td>${s.p[2]}</td><td>${s.p[3]}</td><td class="pts">${s.total}</td></tr>`).join('') + `</table>`;
+}
+
+function showFinal() {
+  $('round').hidden = true; $('startWrap').hidden = true; $('board').hidden = true;
+  $('status').textContent = 'Fim de jogo!';
+  const col = (title, idx) => {
+    const sum = idx.reduce((t, i) => t + scores[i].total, 0);
+    return {sum, html: `<div class="card"><h2 style="margin-top:0">${title}</h2>` +
+      idx.map(i => `<p>Rodada ${i + 1}: <b>${scores[i].total}</b></p>`).join('') +
+      `<p>TOTAL: <b class="pts">${sum}</b></p></div>`};
+  };
+  const c1 = col('PLAYER 1', [0, 2, 4]), c2 = col('PLAYER 2', [1, 3, 5]);
+  const w = c1.sum > c2.sum ? 'PLAYER 1 WINNER' : c2.sum > c1.sum ? 'PLAYER 2 WINNER' : 'EMPATE!';
+  $('final').innerHTML = `<div class="cols">${c1.html}${c2.html}</div><div class="win">${w}</div>
+    <button class="big" style="font-size:22px;padding:16px 40px" onclick="newGame()">JOGAR NOVAMENTE</button>`;
+  $('final').hidden = false;
+}
+function newGame() {
+  r = 0; scores = []; used = []; cur = null;
+  $('final').hidden = true; $('board').hidden = true; $('round').hidden = true;
+  $('start').textContent = 'START'; $('start').style.fontSize = '';
+  $('startWrap').hidden = false; $('status').textContent = '';
+}
+
+$('start').onclick = () => (r >= 6 ? showFinal() : beginRound());
+$('play').onclick = play;
+$('reveal').onclick = reveal;
+
+/* ---------- Admin ---------- */
+let editId = null;
+function drawList() {
+  $('list').innerHTML = db.length
+    ? `<table><tr><th>Nome</th><th>Jogo</th><th>Console</th><th>Ano</th><th></th></tr>` +
+      db.map(s => `<tr><td>${esc(s.name)}</td><td>${esc(s.game)}</td><td>${esc(s.console)}</td><td>${esc(s.year)}</td>
+      <td style="white-space:nowrap"><button class="sec" style="padding:6px 10px" onclick="editSong('${s.id}')">Editar</button>
+      <button class="del" style="padding:6px 10px" onclick="delSong('${s.id}')">Excluir</button></td></tr>`).join('') + `</table>`
+    : '<p class="status">Nenhuma música cadastrada ainda.</p>';
+}
+function clearForm() {
+  editId = null;
+  ['aLink', 'aName', 'aGame', 'aCons', 'aYear'].forEach(i => $(i).value = '');
+  $('formTitle').textContent = 'Nova música'; $('aSave').textContent = 'ADICIONAR'; $('aCancel').hidden = true;
+}
+$('aSave').onclick = () => {
+  const s = {link: $('aLink').value.trim(), name: $('aName').value.trim(), game: $('aGame').value.trim(), console: $('aCons').value.trim(), year: $('aYear').value.trim()};
+  if (!s.link || !s.name || !s.game || !s.console || !/^\d{4}$/.test(s.year)) { $('amsg').textContent = 'Preencha todos os campos (ano com 4 dígitos).'; return; }
+  $('amsg').textContent = '';
+  if (editId) { const i = db.findIndex(x => x.id === editId); db[i] = {...s, id: editId}; }
+  else db.push({...s, id: Date.now() + '' + Math.floor(Math.random() * 1000)});
+  saveDb(); clearForm(); drawList();
+};
+$('aCancel').onclick = clearForm;
+function editSong(id) {
+  const s = db.find(x => x.id === id); if (!s) return;
+  editId = id;
+  $('aLink').value = s.link; $('aName').value = s.name; $('aGame').value = s.game; $('aCons').value = s.console; $('aYear').value = s.year;
+  $('formTitle').textContent = 'Editando música'; $('aSave').textContent = 'SALVAR ALTERAÇÕES'; $('aCancel').hidden = false;
+  window.scrollTo(0, 0);
+}
+function delSong(id) {
+  const s = db.find(x => x.id === id);
+  if (s && confirm(`Excluir "${s.name}"?`)) { db = db.filter(x => x.id !== id); saveDb(); drawList(); if (editId === id) clearForm(); }
+}
+$('exp').onclick = () => {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(db, null, 2)], {type: 'application/json'}));
+  a.download = 'banco-musicas.json'; a.click();
+};
+$('impBtn').onclick = () => $('imp').click();
+$('imp').onchange = e => {
+  const f = e.target.files[0]; if (!f) return;
+  const rd = new FileReader();
+  rd.onload = () => {
+    try {
+      const d = JSON.parse(rd.result);
+      if (!Array.isArray(d)) throw 0;
+      db = d.filter(x => x && x.link && x.name).map(x => ({...x, id: x.id || Date.now() + '' + Math.random()}));
+      saveDb(); drawList(); alert('Backup importado: ' + db.length + ' músicas.');
+    } catch (err) { alert('Arquivo inválido.'); }
+  };
+  rd.readAsText(f); e.target.value = '';
+};
+
+/* ---------- Abas ---------- */
+function tab(g) {
+  $('game').hidden = !g; $('admin').hidden = g;
+  $('tabG').classList.toggle('on', g); $('tabA').classList.toggle('on', !g);
+  if (!g) { stopAll(); drawList(); }
+}
+$('tabG').onclick = () => tab(true);
+$('tabA').onclick = () => tab(false);
+drawList();
+</script>
+</body>
+</html>
